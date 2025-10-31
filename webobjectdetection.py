@@ -1,61 +1,73 @@
-import cv2
 import streamlit as st
+import cv2
 import numpy as np
+from PIL import Image
 
-st.set_page_config(page_title="Object Detection", page_icon="👀")
-
-st.title("Object Detection")
-
-
-uploaded_file = st.file_uploader("Image:", type=["jpg", "jpeg", "png"])
-
-confThreshold = 0.5
-configfile = "datafile.pbtxt"
-model = "frozen_inference_graph.pb"
-classLabels = "objects.names"
+CONF_THRESHOLD = 0.55
+CONFIG_FILE = "datafile.pbtxt"
+MODEL_FILE = "frozen_inference_graph.pb"
+CLASS_FILE = "objects.names"
 
 @st.cache_resource
 def load_model():
-    net = cv2.dnn.readNetFromTensorflow(model, configfile)
-    return net
+    net = cv2.dnn.readNetFromTensorflow(MODEL_FILE, CONFIG_FILE)
+    with open(CLASS_FILE, "rt") as f:
+        class_labels = f.read().rstrip("\n").split("\n")
+    return net, class_labels
 
-@st.cache_data
-def load_labels():
-    with open(classLabels, "rt") as fpt:
-        return fpt.read().rstrip("\n").split("\n")
+net, class_labels = load_model()
+st.title("Object Detection App")
 
-net = load_model()
-classlabelsarray = load_labels()
+mode = st.sidebar.radio("Choose mode", ["Image Upload", "Webcam Detection"])
 
-if uploaded_file is not None:
-    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-    image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-    height, width, _ = image.shape
+if mode == "Image Upload":
+    uploaded_image = st.file_uploader("Upload an image...", type=["jpg", "jpeg", "png"])
+    if uploaded_image:
+        image = Image.open(uploaded_image)
+        image_np = np.array(image)
+        height, width, _ = image_np.shape
+        blob = cv2.dnn.blobFromImage(image_np, 1.0/127.5, (320, 320), (127.5,127.5,127.5), swapRB=True, crop=False)
+        net.setInput(blob)
+        prediction = net.forward()
+        for i in range(prediction.shape[2]):
+            confidence = prediction[0,0,i,2]
+            if confidence > CONF_THRESHOLD:
+                class_id = int(prediction[0,0,i,1])
+                class_name = class_labels[class_id - 1]
+                x = int(prediction[0,0,i,3]*width)
+                y = int(prediction[0,0,i,4]*height)
+                xbr = int(prediction[0,0,i,5]*width)
+                ybr = int(prediction[0,0,i,6]*height)
+                cv2.rectangle(image_np, (x, y), (xbr, ybr), (0,255,0), 2)
+                cv2.putText(image_np, class_name, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
+                st.subheader(f"Detected: **{class_name}** with **{confidence*100}%** confidence ")
+        st.image(image_np, caption="Detected Objects", channels="BGR")
 
-    blob = cv2.dnn.blobFromImage(image, 1.0/127.5, (320,320), (127.5,127.5,127.5), swapRB=True, crop=False)
-    net.setInput(blob)
-    prediction = net.forward()
-
-    detected_classes = []
-    st.header("Detected Objects")
-
-    for i in range(prediction.shape[2]):
-        confidence = prediction[0,0,i,2]
-        if confidence > confThreshold:
-            class_id = int(prediction[0,0,i,1])
-            class_name = classlabelsarray[class_id-1]
-            detected_classes.append(class_name)
-            x = int(prediction[0,0,i,3]*width)
-            y = int(prediction[0,0,i,4]*height)
-            xbr = int(prediction[0,0,i,5]*width)
-            ybr = int(prediction[0,0,i,6]*height)
-            cv2.rectangle(image, (x,y), (xbr,ybr), (0,255,0), 2)
-            cv2.putText(image, class_name, (x, y-10), cv2.FONT_HERSHEY_DUPLEX, 2, (0,255,0), 2)
-            confidence_percent = round(confidence * 100)
-            st.subheader(f"{class_name} with {confidence_percent}% confidence")
-        
-
-    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    st.image(image_rgb, caption="Detected Objects", use_container_width=True)
-
-
+elif mode == "Webcam Detection":
+    st.write("Press **Start** to begin webcam object detection.")
+    start_btn = st.button("Start Detection")
+    if start_btn:
+        cap = cv2.VideoCapture(0)
+        stframe = st.empty()
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                st.warning("Unable to access webcam.")
+                break
+            height, width, _ = frame.shape
+            blob = cv2.dnn.blobFromImage(frame, 1.0/127.5, (320,320),(127.5,127.5,127.5), swapRB=True, crop=False)
+            net.setInput(blob)
+            prediction = net.forward()
+            for i in range(prediction.shape[2]):
+                confidence = prediction[0,0,i,2]
+                if confidence > CONF_THRESHOLD:
+                    class_id = int(prediction[0,0,i,1])
+                    class_name = class_labels[class_id - 1]
+                    x = int(prediction[0,0,i,3]*width)
+                    y = int(prediction[0,0,i,4]*height)
+                    xbr = int(prediction[0,0,i,5]*width)
+                    ybr = int(prediction[0,0,i,6]*height)
+                    cv2.rectangle(frame, (x,y), (xbr,ybr), (0,255,0), 2)
+                    cv2.putText(frame, class_name, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
+            stframe.image(frame, channels="BGR")
+        cap.release()
