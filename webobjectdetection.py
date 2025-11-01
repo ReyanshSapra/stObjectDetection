@@ -47,7 +47,7 @@ elif mode == "Webcam Detection":
     st.write("Press **Start** to begin webcam object detection.")
     start_btn = st.button("Start Detection")
     if start_btn:
-        cap = cv2.VideoCapture(0)
+        cap = st.VideoCapture()
         stframe = st.empty()
         while True:
             ret, frame = cap.read()
@@ -71,3 +71,4 @@ elif mode == "Webcam Detection":
                     cv2.putText(frame, class_name, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
             stframe.image(frame, channels="BGR")
         cap.release()
+
